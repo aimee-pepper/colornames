@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CMYK Color Namer</title>
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+  <header>
+    <h1>CMYK Color Namer</h1>
+    <p class="subtitle">Pick a CMYK color and find its closest named shades</p>
+  </header>
+
+  <main class="layout">
+    <div class="panel-left">
+      <section id="preview" class="preview-swatch" aria-label="Color preview">
+        <span id="preview-hex" class="preview-label">#000000</span>
+      </section>
+
+      <section class="color-values">
+        <div class="hex-display">
+          <label for="hex-input">HEX</label>
+          <input type="text" id="hex-input" readonly value="#000000">
+          <button id="copy-hex" class="btn-copy" title="Copy hex value">Copy</button>
+        </div>
+        <div class="rgb-display">
+          <span id="rgb-value">RGB: 0, 0, 0</span>
+        </div>
+      </section>
+
+      <section class="sliders" aria-label="CMYK sliders">
+        <div class="slider-row" data-channel="c">
+          <label for="slider-c">C</label>
+          <input type="range" id="slider-c" min="0" max="100" value="0" step="1">
+          <input type="number" id="num-c" min="0" max="100" value="0" step="1" class="num-input">
+          <span class="unit">%</span>
+        </div>
+        <div class="slider-row" data-channel="m">
+          <label for="slider-m">M</label>
+          <input type="range" id="slider-m" min="0" max="100" value="0" step="1">
+          <input type="number" id="num-m" min="0" max="100" value="0" step="1" class="num-input">
+          <span class="unit">%</span>
+        </div>
+        <div class="slider-row" data-channel="y">
+          <label for="slider-y">Y</label>
+          <input type="range" id="slider-y" min="0" max="100" value="0" step="1">
+          <input type="number" id="num-y" min="0" max="100" value="0" step="1" class="num-input">
+          <span class="unit">%</span>
+        </div>
+        <div class="slider-row" data-channel="k">
+          <label for="slider-k">K</label>
+          <input type="range" id="slider-k" min="0" max="100" value="100" step="1">
+          <input type="number" id="num-k" min="0" max="100" value="100" step="1" class="num-input">
+          <span class="unit">%</span>
+        </div>
+      </section>
+
+      <section class="library-filters" aria-label="Filter by color library">
+        <span class="filter-label">Libraries:</span>
+        <div id="filter-buttons" class="filter-buttons"></div>
+      </section>
+
+      <footer>
+        <p class="note">CMYK to RGB conversion is an approximation without ICC color profiles.</p>
+      </footer>
+    </div>
+
+    <div class="panel-right">
+      <h2>Closest Named Colors</h2>
+      <div class="results-scroll">
+        <div id="results-list" class="results-list"></div>
+      </div>
+    </div>
+  </main>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
