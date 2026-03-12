@@ -56,8 +56,21 @@
         </div>
       </section>
 
+      <section class="hsv-picker" aria-label="HSV color picker">
+        <div class="hsv-picker-row">
+          <div class="sv-panel-wrap">
+            <canvas id="sv-canvas" width="220" height="220"></canvas>
+            <div id="sv-cursor" class="sv-cursor"></div>
+          </div>
+          <div class="hue-strip-wrap">
+            <canvas id="hue-canvas" width="24" height="220"></canvas>
+            <div id="hue-cursor" class="hue-cursor"></div>
+          </div>
+        </div>
+      </section>
+
       <section class="library-filters" aria-label="Filter by color library">
-        <span class="filter-label">Libraries:</span>
+        <span class="filter-label">Libraries: <span class="filter-hint">click to toggle</span></span>
         <div id="filter-buttons" class="filter-buttons"></div>
       </section>
 
@@ -67,7 +80,14 @@
     </div>
 
     <div class="panel-right">
-      <h2>Closest Named Colors</h2>
+      <div class="results-header">
+        <h2>Closest Named Colors</h2>
+        <div class="delta-control">
+          <label for="delta-slider">&Delta;E max</label>
+          <input type="range" id="delta-slider" min="1" max="100" value="20" step="1">
+          <span id="delta-value">20</span>
+        </div>
+      </div>
       <div class="results-scroll">
         <div id="results-list" class="results-list"></div>
       </div>

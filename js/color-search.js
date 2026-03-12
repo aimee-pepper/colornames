@@ -8,6 +8,10 @@ import { ralColors } from '../data/ral-colors.js';
 import { crayolaColors } from '../data/crayola-colors.js';
 import { pigmentColors } from '../data/pigment-colors.js';
 import { wikipediaColors } from '../data/wikipedia-colors.js';
+import { japaneseColors } from '../data/japanese-colors.js';
+import { wernerColors } from '../data/werner-colors.js';
+import { makeupColors } from '../data/makeup-colors.js';
+import { foundationColors } from '../data/foundation-colors.js';
 
 export const libraries = [
   cssColors,
@@ -17,6 +21,10 @@ export const libraries = [
   crayolaColors,
   pigmentColors,
   wikipediaColors,
+  japaneseColors,
+  wernerColors,
+  makeupColors,
+  foundationColors,
 ];
 
 // Flat array of all colors with precomputed LAB values
@@ -38,7 +46,7 @@ export function init() {
   }
 }
 
-export function findClosest(c, m, y, k, count = 20, enabledLibraries = null) {
+export function findClosest(c, m, y, k, enabledLibraries = null, maxDelta = 20) {
   const rgb = cmykToRgb(c, m, y, k);
   const targetLab = rgbToLab(rgb[0], rgb[1], rgb[2]);
 
@@ -58,7 +66,7 @@ export function findClosest(c, m, y, k, count = 20, enabledLibraries = null) {
   }
 
   results.sort((a, b) => a.distance - b.distance);
-  return results.slice(0, count);
+  return results.filter((r) => r.distance <= maxDelta);
 }
 
 export function getColorCount() {
