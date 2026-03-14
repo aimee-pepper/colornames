@@ -259,6 +259,7 @@ function update() {
   lastTargetLab = rgbToLab(r, g, b);
   renderResults(results);
   renderRadial(results, lastTargetLab, hex);
+  renderCommonness(results);
 }
 
 function renderResults(results) {
@@ -295,22 +296,66 @@ function escapeHtml(str) {
 // View tabs
 const viewList = document.getElementById('view-list');
 const viewRadial = document.getElementById('view-radial');
+const viewCommonness = document.getElementById('view-commonness');
+const commonnessList = document.getElementById('commonness-list');
 const radialCanvas = document.getElementById('radial-canvas');
 const radialCtx = radialCanvas.getContext('2d');
 const viewTabs = document.querySelectorAll('.view-tab');
+
+// Radial zoom state
+let radialZoom = 1;
+let radialPanX = 0;
+let radialPanY = 0;
+let isPanning = false;
+let panStartX = 0;
+let panStartY = 0;
+
+viewRadial.addEventListener('wheel', (e) => {
+  e.preventDefault();
+  const factor = e.deltaY > 0 ? 0.9 : 1.1;
+  radialZoom = Math.max(0.5, Math.min(10, radialZoom * factor));
+  renderRadial(lastResults, lastTargetLab);
+}, { passive: false });
+
+viewRadial.addEventListener('pointerdown', (e) => {
+  if (e.target === radialCanvas) {
+    isPanning = true;
+    panStartX = e.clientX - radialPanX;
+    panStartY = e.clientY - radialPanY;
+    viewRadial.style.cursor = 'grabbing';
+  }
+});
+
+window.addEventListener('pointermove', (e) => {
+  if (!isPanning) return;
+  radialPanX = e.clientX - panStartX;
+  radialPanY = e.clientY - panStartY;
+  renderRadial(lastResults, lastTargetLab);
+});
+
+window.addEventListener('pointerup', () => {
+  if (isPanning) {
+    isPanning = false;
+    viewRadial.style.cursor = '';
+  }
+});
 
 for (const tab of viewTabs) {
   tab.addEventListener('click', () => {
     for (const t of viewTabs) t.classList.remove('active');
     tab.classList.add('active');
     currentView = tab.dataset.view;
-    if (currentView === 'list') {
-      viewList.style.display = '';
-      viewRadial.style.display = 'none';
-    } else {
-      viewList.style.display = 'none';
-      viewRadial.style.display = '';
+    viewList.style.display = currentView === 'list' ? '' : 'none';
+    viewRadial.style.display = currentView === 'radial' ? '' : 'none';
+    viewCommonness.style.display = currentView === 'commonness' ? '' : 'none';
+    if (currentView === 'radial') {
+      radialZoom = 1;
+      radialPanX = 0;
+      radialPanY = 0;
       renderRadial(lastResults, lastTargetLab);
+    }
+    if (currentView === 'commonness') {
+      renderCommonness(lastResults);
     }
   });
 }
@@ -334,9 +379,15 @@ function renderRadial(results, targetLab) {
   // Clear
   radialCtx.clearRect(0, 0, w, h);
 
+  // Apply zoom and pan
+  radialCtx.save();
+  radialCtx.translate(cx + radialPanX, cy + radialPanY);
+  radialCtx.scale(radialZoom, radialZoom);
+  radialCtx.translate(-cx, -cy);
+
   // Draw subtle range rings
   radialCtx.strokeStyle = 'rgba(0,0,0,0.06)';
-  radialCtx.lineWidth = 1;
+  radialCtx.lineWidth = 1 / radialZoom;
   for (let i = 1; i <= 4; i++) {
     const r = (i / 4) * maxRadius;
     radialCtx.beginPath();
@@ -352,7 +403,7 @@ function renderRadial(results, targetLab) {
   radialCtx.arc(cx, cy, 16, 0, Math.PI * 2);
   radialCtx.fill();
   radialCtx.strokeStyle = luminance(tr, tg, tb) > 0.18 ? 'rgba(0,0,0,0.2)' : 'rgba(255,255,255,0.3)';
-  radialCtx.lineWidth = 1.5;
+  radialCtx.lineWidth = 1.5 / radialZoom;
   radialCtx.stroke();
 
   if (results.length === 0) return;
@@ -405,7 +456,7 @@ function renderRadial(results, targetLab) {
     radialCtx.arc(x, y, swatchSize / 2, 0, Math.PI * 2);
     radialCtx.fill();
     radialCtx.strokeStyle = 'rgba(0,0,0,0.15)';
-    radialCtx.lineWidth = 1;
+    radialCtx.lineWidth = 1 / radialZoom;
     radialCtx.stroke();
 
     // Draw name below
@@ -415,6 +466,78 @@ function renderRadial(results, targetLab) {
     radialCtx.textBaseline = 'top';
     const label = color.name.length > 16 ? color.name.slice(0, 15) + '…' : color.name;
     radialCtx.fillText(label, x, y + swatchSize / 2 + labelPad);
+  }
+
+  radialCtx.restore();
+}
+
+// Commonness view
+function renderCommonness(results) {
+  if (currentView !== 'commonness') return;
+  commonnessList.innerHTML = '';
+
+  if (results.length === 0) {
+    commonnessList.innerHTML =
+      '<p class="commonness-empty">No colors in range</p>';
+    return;
+  }
+
+  // Normalize names for grouping: lowercase, strip punctuation, trim
+  function normalizeName(name) {
+    return name.toLowerCase().replace(/[''`]/g, '').replace(/[-_]/g, ' ').replace(/\s+/g, ' ').trim();
+  }
+
+  // Group colors by normalized name
+  const groups = new Map();
+  for (const color of results) {
+    const key = normalizeName(color.name);
+    if (!groups.has(key)) {
+      groups.set(key, { displayName: color.name, colors: [] });
+    }
+    groups.get(key).colors.push(color);
+  }
+
+  // Sort by count descending, then by best delta
+  const sorted = [...groups.values()].sort((a, b) => {
+    if (b.colors.length !== a.colors.length) return b.colors.length - a.colors.length;
+    const bestA = Math.min(...a.colors.map(c => c.distance));
+    const bestB = Math.min(...b.colors.map(c => c.distance));
+    return bestA - bestB;
+  });
+
+  for (const group of sorted) {
+    const div = document.createElement('div');
+    div.className = 'commonness-group';
+
+    const header = document.createElement('div');
+    header.className = 'commonness-header';
+
+    const name = document.createElement('span');
+    name.className = 'commonness-name';
+    name.textContent = group.displayName;
+    header.appendChild(name);
+
+    if (group.colors.length > 1) {
+      const count = document.createElement('span');
+      count.className = 'commonness-count';
+      count.textContent = `${group.colors.length} libraries`;
+      header.appendChild(count);
+    }
+
+    div.appendChild(header);
+
+    const swatches = document.createElement('div');
+    swatches.className = 'commonness-swatches';
+
+    for (const color of group.colors) {
+      const sw = document.createElement('span');
+      sw.className = 'commonness-swatch';
+      sw.innerHTML = `<span class="commonness-swatch-dot" style="background:${color.hex}"></span>${escapeHtml(color.library)} <span style="opacity:0.5">&Delta;E ${color.distance.toFixed(1)}</span>`;
+      swatches.appendChild(sw);
+    }
+
+    div.appendChild(swatches);
+    commonnessList.appendChild(div);
   }
 }
 

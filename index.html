@@ -84,6 +84,7 @@
         <div class="view-tabs">
           <button class="view-tab active" data-view="list">List</button>
           <button class="view-tab" data-view="radial">Radial</button>
+          <button class="view-tab" data-view="commonness">Names</button>
         </div>
         <div class="delta-control">
           <label for="delta-slider">&Delta;E max</label>
@@ -96,6 +97,10 @@
       </div>
       <div id="view-radial" class="radial-view" style="display:none;">
         <canvas id="radial-canvas"></canvas>
+        <div class="zoom-hint">Scroll to zoom</div>
+      </div>
+      <div id="view-commonness" class="results-scroll" style="display:none;">
+        <div id="commonness-list" class="commonness-list"></div>
       </div>
     </div>
   </main>
