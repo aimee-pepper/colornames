@@ -490,8 +490,7 @@ function renderCommonness(results) {
   // Words too generic to group by
   const stopWords = new Set([
     'a', 'an', 'the', 'of', 'de', 'du', 'no', 'is', 'in', 'at', 'to',
-    'and', 'or', 'with', 'very', 'light', 'dark', 'medium', 'pale', 'deep',
-    'bright', 'dull', 'vivid', 'muted', 'extra', 'semi', 'ultra',
+    'and', 'or', 'with',
   ]);
 
   function getWords(name) {
