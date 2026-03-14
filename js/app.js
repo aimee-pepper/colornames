@@ -487,58 +487,112 @@ function renderCommonness(results) {
     return name.toLowerCase().replace(/[''`]/g, '').replace(/[-_]/g, ' ').replace(/\s+/g, ' ').trim();
   }
 
-  // Group colors by normalized name
-  const groups = new Map();
-  for (const color of results) {
-    const key = normalizeName(color.name);
-    if (!groups.has(key)) {
-      groups.set(key, { displayName: color.name, colors: [] });
-    }
-    groups.get(key).colors.push(color);
+  // Words too generic to group by
+  const stopWords = new Set([
+    'a', 'an', 'the', 'of', 'de', 'du', 'no', 'is', 'in', 'at', 'to',
+    'and', 'or', 'with', 'very', 'light', 'dark', 'medium', 'pale', 'deep',
+    'bright', 'dull', 'vivid', 'muted', 'extra', 'semi', 'ultra',
+  ]);
+
+  function getWords(name) {
+    return normalizeName(name)
+      .split(/\s+/)
+      .filter(w => w.length >= 3 && !stopWords.has(w));
   }
 
-  // Sort by count descending, then by best delta
-  const sorted = [...groups.values()].sort((a, b) => {
+  // --- Exact name groups ---
+  const exactGroups = new Map();
+  for (const color of results) {
+    const key = normalizeName(color.name);
+    if (!exactGroups.has(key)) {
+      exactGroups.set(key, { displayName: color.name, colors: [], type: 'exact' });
+    }
+    exactGroups.get(key).colors.push(color);
+  }
+
+  // Only keep exact groups with 2+ matches
+  const exactMatches = [...exactGroups.values()].filter(g => g.colors.length > 1);
+
+  // --- Word groups ---
+  const wordGroups = new Map();
+  for (const color of results) {
+    for (const word of getWords(color.name)) {
+      if (!wordGroups.has(word)) {
+        wordGroups.set(word, { displayName: word, colors: [], type: 'word' });
+      }
+      wordGroups.get(word).colors.push(color);
+    }
+  }
+
+  // Only keep word groups with 2+ matches
+  const wordMatches = [...wordGroups.values()].filter(g => g.colors.length > 1);
+
+  // Sort helper: count desc, then best delta
+  const sortGroups = (a, b) => {
     if (b.colors.length !== a.colors.length) return b.colors.length - a.colors.length;
     const bestA = Math.min(...a.colors.map(c => c.distance));
     const bestB = Math.min(...b.colors.map(c => c.distance));
     return bestA - bestB;
-  });
+  };
 
-  for (const group of sorted) {
-    const div = document.createElement('div');
-    div.className = 'commonness-group';
+  exactMatches.sort(sortGroups);
+  wordMatches.sort(sortGroups);
 
-    const header = document.createElement('div');
-    header.className = 'commonness-header';
+  // Render a section
+  function renderSection(title, groups) {
+    if (groups.length === 0) return;
 
-    const name = document.createElement('span');
-    name.className = 'commonness-name';
-    name.textContent = group.displayName;
-    header.appendChild(name);
+    const heading = document.createElement('div');
+    heading.className = 'commonness-section-heading';
+    heading.textContent = title;
+    commonnessList.appendChild(heading);
 
-    if (group.colors.length > 1) {
+    for (const group of groups) {
+      const div = document.createElement('div');
+      div.className = 'commonness-group';
+
+      const header = document.createElement('div');
+      header.className = 'commonness-header';
+
+      const name = document.createElement('span');
+      name.className = 'commonness-name';
+      name.textContent = group.type === 'word'
+        ? group.displayName.charAt(0).toUpperCase() + group.displayName.slice(1)
+        : group.displayName;
+      header.appendChild(name);
+
       const count = document.createElement('span');
       count.className = 'commonness-count';
-      count.textContent = `${group.colors.length} libraries`;
+      count.textContent = group.type === 'exact'
+        ? `${group.colors.length} libraries`
+        : `${group.colors.length} colors`;
       header.appendChild(count);
+
+      div.appendChild(header);
+
+      const swatches = document.createElement('div');
+      swatches.className = 'commonness-swatches';
+
+      for (const color of group.colors) {
+        const sw = document.createElement('span');
+        sw.className = 'commonness-swatch';
+        sw.innerHTML = `<span class="commonness-swatch-dot" style="background:${color.hex}"></span>${escapeHtml(group.type === 'exact' ? color.library : color.name)} <span style="opacity:0.5">&Delta;E ${color.distance.toFixed(1)}</span>`;
+        swatches.appendChild(sw);
+      }
+
+      div.appendChild(swatches);
+      commonnessList.appendChild(div);
     }
-
-    div.appendChild(header);
-
-    const swatches = document.createElement('div');
-    swatches.className = 'commonness-swatches';
-
-    for (const color of group.colors) {
-      const sw = document.createElement('span');
-      sw.className = 'commonness-swatch';
-      sw.innerHTML = `<span class="commonness-swatch-dot" style="background:${color.hex}"></span>${escapeHtml(color.library)} <span style="opacity:0.5">&Delta;E ${color.distance.toFixed(1)}</span>`;
-      swatches.appendChild(sw);
-    }
-
-    div.appendChild(swatches);
-    commonnessList.appendChild(div);
   }
+
+  if (exactMatches.length === 0 && wordMatches.length === 0) {
+    commonnessList.innerHTML =
+      '<p class="commonness-empty">No shared names in range — try increasing &Delta;E max</p>';
+    return;
+  }
+
+  renderSection('Exact name matches', exactMatches);
+  renderSection('Shared words', wordMatches);
 }
 
 // Resize radial on window resize
