@@ -1,4 +1,4 @@
-import { cmykToRgb, rgbToHex, luminance, rgbToHsv, hsvToRgb, rgbToCmyk } from './color-convert.js';
+import { cmykToRgb, rgbToHex, luminance, rgbToHsv, hsvToRgb, rgbToCmyk, rgbToLab } from './color-convert.js';
 import { init, findClosest, libraries, getColorCount } from './color-search.js';
 
 // DOM elements
@@ -28,6 +28,9 @@ const numInputs = {
 
 // State
 const enabledLibraries = new Set(libraries.map((l) => l.name));
+let currentView = 'list';
+let lastResults = [];
+let lastTargetLab = [0, 0, 0];
 
 // Initialize color database
 init();
@@ -252,7 +255,10 @@ function update() {
   // Find closest colors
   const maxDelta = parseInt(deltaSlider.value, 10);
   const results = findClosest(c, m, y, k, enabledLibraries, maxDelta);
+  lastResults = results;
+  lastTargetLab = rgbToLab(r, g, b);
   renderResults(results);
+  renderRadial(results, lastTargetLab, hex);
 }
 
 function renderResults(results) {
@@ -285,6 +291,139 @@ function escapeHtml(str) {
   div.textContent = str;
   return div.innerHTML;
 }
+
+// View tabs
+const viewList = document.getElementById('view-list');
+const viewRadial = document.getElementById('view-radial');
+const radialCanvas = document.getElementById('radial-canvas');
+const radialCtx = radialCanvas.getContext('2d');
+const viewTabs = document.querySelectorAll('.view-tab');
+
+for (const tab of viewTabs) {
+  tab.addEventListener('click', () => {
+    for (const t of viewTabs) t.classList.remove('active');
+    tab.classList.add('active');
+    currentView = tab.dataset.view;
+    if (currentView === 'list') {
+      viewList.style.display = '';
+      viewRadial.style.display = 'none';
+    } else {
+      viewList.style.display = 'none';
+      viewRadial.style.display = '';
+      renderRadial(lastResults, lastTargetLab);
+    }
+  });
+}
+
+function renderRadial(results, targetLab) {
+  if (currentView !== 'radial') return;
+
+  const container = viewRadial;
+  const w = container.clientWidth;
+  const h = container.clientHeight;
+  const dpr = window.devicePixelRatio || 1;
+  radialCanvas.width = w * dpr;
+  radialCanvas.height = h * dpr;
+  radialCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+  const cx = w / 2;
+  const cy = h / 2;
+  const maxRadius = Math.min(cx, cy) - 50;
+  const maxDelta = parseInt(deltaSlider.value, 10) || 20;
+
+  // Clear
+  radialCtx.clearRect(0, 0, w, h);
+
+  // Draw subtle range rings
+  radialCtx.strokeStyle = 'rgba(0,0,0,0.06)';
+  radialCtx.lineWidth = 1;
+  for (let i = 1; i <= 4; i++) {
+    const r = (i / 4) * maxRadius;
+    radialCtx.beginPath();
+    radialCtx.arc(cx, cy, r, 0, Math.PI * 2);
+    radialCtx.stroke();
+  }
+
+  // Draw center swatch (selected color)
+  const [tr, tg, tb] = hsvToRgb(currentHue, currentSat, currentVal);
+  const centerHex = rgbToHex(tr, tg, tb);
+  radialCtx.fillStyle = centerHex;
+  radialCtx.beginPath();
+  radialCtx.arc(cx, cy, 16, 0, Math.PI * 2);
+  radialCtx.fill();
+  radialCtx.strokeStyle = luminance(tr, tg, tb) > 0.18 ? 'rgba(0,0,0,0.2)' : 'rgba(255,255,255,0.3)';
+  radialCtx.lineWidth = 1.5;
+  radialCtx.stroke();
+
+  if (results.length === 0) return;
+
+  // Position each color:
+  // - angle from the chromatic difference (da, db in LAB)
+  // - distance from center = deltaE mapped to maxRadius
+  const swatchSize = 18;
+  const fontSize = 8;
+  const labelPad = 3;
+
+  // Collect positioned swatches for collision avoidance
+  const placed = [];
+
+  for (const color of results) {
+    const da = color.lab[1] - targetLab[1];
+    const db = color.lab[2] - targetLab[2];
+
+    // Angle from chromatic difference
+    let angle = Math.atan2(db, da);
+
+    // Distance = deltaE mapped to radius
+    const dist = (color.distance / maxDelta) * maxRadius;
+
+    let x = cx + Math.cos(angle) * dist;
+    let y = cy + Math.sin(angle) * dist;
+
+    // Nudge to avoid overlaps
+    for (let attempt = 0; attempt < 8; attempt++) {
+      let overlap = false;
+      for (const p of placed) {
+        const dx = x - p.x;
+        const dy = y - p.y;
+        if (Math.sqrt(dx * dx + dy * dy) < swatchSize + 2) {
+          overlap = true;
+          break;
+        }
+      }
+      if (!overlap) break;
+      angle += 0.3;
+      x = cx + Math.cos(angle) * dist;
+      y = cy + Math.sin(angle) * dist;
+    }
+
+    placed.push({ x, y });
+
+    // Draw swatch circle
+    radialCtx.fillStyle = color.hex;
+    radialCtx.beginPath();
+    radialCtx.arc(x, y, swatchSize / 2, 0, Math.PI * 2);
+    radialCtx.fill();
+    radialCtx.strokeStyle = 'rgba(0,0,0,0.15)';
+    radialCtx.lineWidth = 1;
+    radialCtx.stroke();
+
+    // Draw name below
+    radialCtx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--text').trim();
+    radialCtx.font = `${fontSize}px -apple-system, sans-serif`;
+    radialCtx.textAlign = 'center';
+    radialCtx.textBaseline = 'top';
+    const label = color.name.length > 16 ? color.name.slice(0, 15) + '…' : color.name;
+    radialCtx.fillText(label, x, y + swatchSize / 2 + labelPad);
+  }
+}
+
+// Resize radial on window resize
+window.addEventListener('resize', () => {
+  if (currentView === 'radial') {
+    renderRadial(lastResults, lastTargetLab);
+  }
+});
 
 // Boot
 loadFromHash();

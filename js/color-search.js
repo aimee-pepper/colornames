@@ -61,6 +61,7 @@ export function findClosest(c, m, y, k, enabledLibraries = null, maxDelta = 20) 
       name: pool[i].name,
       hex: pool[i].hex,
       library: pool[i].library,
+      lab: pool[i].lab,
       distance: deltaE76(targetLab, pool[i].lab),
     };
   }
