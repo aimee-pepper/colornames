@@ -11,7 +11,7 @@ const resultsList = document.getElementById('results-list');
 const filterContainer = document.getElementById('filter-buttons');
 const deltaSlider = document.getElementById('delta-slider');
 const deltaValue = document.getElementById('delta-value');
-const suggestedNameEl = document.getElementById('suggested-name-value');
+const suggestedNamesList = document.getElementById('suggested-names-list');
 
 const sliders = {
   c: document.getElementById('slider-c'),
@@ -261,41 +261,32 @@ function update() {
   renderResults(results);
   renderRadial(results, lastTargetLab, hex);
   renderCommonness(results);
-  suggestedNameEl.textContent = generateSuggestedName(results);
+  renderSuggestedNames(results);
 }
 
-// Generate a suggested color name from nearby results (always 2+ words)
-function generateSuggestedName(results) {
-  if (results.length === 0) return '—';
-
-  // If the closest match is very close (deltaE < 1) AND has 2+ words, use it
-  if (results[0].distance < 1 && results[0].name.trim().split(/\s+/).length >= 2) {
-    return results[0].name;
-  }
+// Generate multiple suggested color name candidates
+function generateSuggestedNames(results) {
+  if (results.length === 0) return [];
 
   const h = currentHue, s = currentSat, v = currentVal;
 
-  // --- Classify words ---
   const filler = new Set([
     'a', 'an', 'the', 'of', 'de', 'du', 'no', 'is', 'in', 'at', 'to',
     'and', 'or', 'with', 'ral', 'ntc', 'css',
   ]);
 
-  // Generic color family words — broad categories, never enough on their own
   const genericColors = new Set([
     'red', 'blue', 'green', 'yellow', 'orange', 'purple', 'pink', 'brown',
     'grey', 'gray', 'white', 'black', 'violet', 'cyan', 'magenta',
   ]);
 
-  // Recognized standalone color names — these ARE colors and don't need a
-  // generic color family word appended
   const standaloneColorNames = new Set([
     'viridian', 'cerulean', 'sienna', 'umber', 'ochre', 'crimson', 'scarlet',
     'teal', 'sage', 'mauve', 'coral', 'burgundy', 'chartreuse', 'indigo',
     'turquoise', 'lavender', 'maroon', 'aqua', 'periwinkle', 'fuchsia',
     'khaki', 'ivory', 'ecru', 'beige', 'taupe', 'auburn', 'rust', 'copper',
     'bronze', 'gold', 'silver', 'champagne', 'peach', 'apricot', 'salmon',
-    'tangerine', 'vermillion', 'vermilion', 'carmine', 'cerise', 'magenta',
+    'tangerine', 'vermillion', 'vermilion', 'carmine', 'cerise',
     'amaranth', 'rose', 'blush', 'puce', 'plum', 'lilac', 'orchid',
     'amethyst', 'heather', 'wisteria', 'cobalt', 'azure', 'sapphire',
     'navy', 'denim', 'cornflower', 'slate', 'jade', 'emerald', 'mint',
@@ -308,10 +299,10 @@ function generateSuggestedName(results) {
     'carnelian', 'terracotta', 'paprika', 'cayenne', 'merlot', 'claret',
     'garnet', 'ruby', 'cardinal', 'cranberry', 'raspberry', 'strawberry',
     'watermelon', 'pomegranate', 'hibiscus', 'peony', 'carnation',
-    'flamingo', 'thistle', 'mulberry',
+    'flamingo', 'thistle', 'mulberry', 'cadmium', 'phthalo', 'quinacridone',
+    'alizarin', 'gamboge', 'aureolin',
   ]);
 
-  // Modifier words that describe lightness/saturation/temperature
   const modifierWords = new Set([
     'light', 'dark', 'pale', 'deep', 'bright', 'vivid', 'muted', 'soft',
     'warm', 'cool', 'hot', 'rich', 'dusty', 'smoky', 'pastel', 'neon',
@@ -319,71 +310,17 @@ function generateSuggestedName(results) {
     'burnt', 'raw', 'french', 'indian', 'persian', 'chinese', 'japanese',
     'tropical', 'antique', 'vintage', 'classic', 'natural', 'steel',
     'powder', 'midnight', 'misty', 'faded', 'intense', 'dull',
-    // Nature/place qualifiers — these describe colors but aren't colors themselves
     'jungle', 'forest', 'ocean', 'sky', 'sea', 'sun', 'fire', 'ice',
-    'stone', 'earth', 'sand', 'snow', 'cloud', 'storm', 'shadow',
+    'stone', 'earth', 'snow', 'cloud', 'storm', 'shadow',
     'spring', 'summer', 'autumn', 'winter', 'arctic', 'alpine',
     'desert', 'meadow', 'garden', 'field', 'night', 'dawn', 'dusk',
     'sunset', 'sunrise', 'twilight', 'lunar', 'solar', 'cosmic',
-    'blood', 'wine', 'iron', 'copper', 'golden', 'dusty',
-    'hunter', 'military', 'imperial', 'venetian',
+    'blood', 'wine', 'iron', 'golden',
+    'hunter', 'military', 'imperial', 'venetian', 'transparent',
+    'permanent', 'new', 'chrome', 'mars', 'nickel', 'cobalt',
   ]);
 
-  // Use closest results, weighted by proximity
-  const nearby = results.filter(r => r.distance <= 12).slice(0, 40);
-  if (nearby.length === 0) nearby.push(...results.slice(0, 10));
-
-  // Score words from nearby colors
-  const wordData = new Map();
-  for (const color of nearby) {
-    const weight = 1 / (1 + color.distance * color.distance); // square falloff
-    const colorHsv = rgbToHsv(...hexToRgb(color.hex));
-    const words = color.name.toLowerCase()
-      .replace(/[''`]/g, '')
-      .replace(/[-_]/g, ' ')
-      .replace(/\s+/g, ' ')
-      .trim()
-      .split(/\s+/)
-      .filter(w => w.length >= 2 && !filler.has(w));
-
-    for (const word of words) {
-      const prev = wordData.get(word) || { score: 0, count: 0, hsvSamples: [] };
-      prev.score += weight;
-      prev.count += 1;
-      prev.hsvSamples.push(colorHsv);
-      wordData.set(word, prev);
-    }
-  }
-
-  // Categorize words into three buckets:
-  // - standalone: true color names that work alone (viridian, cerulean, sienna)
-  // - generic: color family words (green, blue, red) — too broad alone
-  // - modifiers: qualifiers that need a color word (dark, jungle, forest, persian)
-  const standaloneWords = [];
-  const genericWords = [];
-  const modWords = [];
-
-  for (const [word, data] of wordData) {
-    if (data.count < 2) continue; // need consensus
-    const entry = { word, score: data.score, count: data.count };
-    if (modifierWords.has(word)) {
-      modWords.push(entry);
-    } else if (genericColors.has(word)) {
-      genericWords.push(entry);
-    } else if (standaloneColorNames.has(word)) {
-      standaloneWords.push(entry);
-    } else {
-      // Unknown word — treat as qualifier, not a standalone color name
-      modWords.push(entry);
-    }
-  }
-
-  standaloneWords.sort((a, b) => b.score - a.score);
-  genericWords.sort((a, b) => b.score - a.score);
-  modWords.sort((a, b) => b.score - a.score);
-
-  // --- Determine HSV-based modifier ---
-  // Compare current color to the average HSV of the best base word's sources
+  // HSV-based modifier
   function hsvModifier() {
     if (s < 8 && v > 85) return 'pale';
     if (s < 12 && v < 25) return 'charcoal';
@@ -400,9 +337,9 @@ function generateSuggestedName(results) {
     return 'soft';
   }
 
-  // --- Determine the color family from HSV hue as ultimate fallback ---
+  // Color family from HSV hue
   function hueFamily() {
-    if (s < 10) return v > 50 ? 'grey' : 'grey';
+    if (s < 10) return 'grey';
     if (h < 15 || h >= 345) return 'red';
     if (h < 40) return 'orange';
     if (h < 70) return 'yellow';
@@ -414,89 +351,128 @@ function generateSuggestedName(results) {
     return 'red';
   }
 
-  // --- Build co-occurrence map ---
-  // Track which words appear TOGETHER in the same color name, so we only
-  // combine words that actually co-occur rather than mashing unrelated colors
-  const cooccurs = new Map(); // "word1\tword2" → count
+  function titleCase(words) {
+    return words.map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+  }
+
+  // Collect unique 2+ word names from nearby results
+  const nearby = results.filter(r => r.distance <= 15).slice(0, 50);
+  if (nearby.length === 0) nearby.push(...results.slice(0, 10));
+
+  // Score words
+  const wordData = new Map();
   for (const color of nearby) {
+    const weight = 1 / (1 + color.distance * color.distance);
     const words = color.name.toLowerCase()
       .replace(/[''`]/g, '').replace(/[-_]/g, ' ').replace(/\s+/g, ' ').trim()
       .split(/\s+/)
       .filter(w => w.length >= 2 && !filler.has(w));
-    for (let i = 0; i < words.length; i++) {
-      for (let j = i + 1; j < words.length; j++) {
-        const key = [words[i], words[j]].sort().join('\t');
-        cooccurs.set(key, (cooccurs.get(key) || 0) + 1);
-      }
+    for (const word of words) {
+      const prev = wordData.get(word) || { score: 0, count: 0 };
+      prev.score += weight;
+      prev.count += 1;
+      wordData.set(word, prev);
     }
   }
 
-  function wordsCooccur(a, b) {
-    const key = [a, b].sort().join('\t');
-    return (cooccurs.get(key) || 0) >= 1;
+  // Categorize
+  const standalones = [], generics = [], mods = [];
+  for (const [word, data] of wordData) {
+    const entry = { word, score: data.score, count: data.count };
+    if (modifierWords.has(word)) { mods.push(entry); }
+    else if (genericColors.has(word)) { generics.push(entry); }
+    else if (standaloneColorNames.has(word)) { standalones.push(entry); }
+    else if (data.count >= 2) { mods.push(entry); } // unknown → modifier
+  }
+  standalones.sort((a, b) => b.score - a.score);
+  generics.sort((a, b) => b.score - a.score);
+  mods.sort((a, b) => b.score - a.score);
+
+  const hMod = hsvModifier();
+  const hFam = hueFamily();
+  const seen = new Set();
+  const candidates = [];
+
+  function addCandidate(parts) {
+    // Deduplicate adjacent words
+    const deduped = parts.filter((w, i) => i === 0 || w !== parts[i - 1]);
+    if (deduped.length < 2) return;
+    const name = titleCase(deduped);
+    if (seen.has(name.toLowerCase())) return;
+    seen.add(name.toLowerCase());
+    candidates.push(name);
   }
 
-  // Find the best modifier that co-occurs with a given base word
-  function bestModFor(baseWord) {
-    const coMods = modWords.filter(m => wordsCooccur(m.word, baseWord));
-    return coMods.length > 0 ? coMods[0].word : null;
+  // Strategy 1: Existing multi-word names from very close matches (deltaE < 3)
+  for (const r of results.filter(r => r.distance < 3)) {
+    const words = r.name.trim().split(/\s+/);
+    if (words.length >= 2) addCandidate(words.map(w => w.toLowerCase()));
   }
 
-  // --- Build the name ---
-  const parts = [];
-
-  if (standaloneWords.length > 0) {
-    // We have a real color name (viridian, sienna, etc.)
-    const base = standaloneWords[0].word;
-    // Prefer a modifier that actually co-occurs with this color name
-    const coMod = bestModFor(base);
-    const mod = coMod || (modWords.length > 0 ? modWords[0].word : hsvModifier());
-    parts.push(mod, base);
-  } else if (genericWords.length > 0) {
-    // We have a generic color family (green, blue) — need qualifier(s)
-    const generic = genericWords[0].word;
-    // Find modifier that co-occurs with this generic word
-    const coMod = bestModFor(generic);
-
-    if (coMod) {
-      // Use the co-occurring modifier: "Forest Green", "Persian Blue"
-      parts.push(coMod, generic);
-    } else if (modWords.length > 0) {
-      // No co-occurrence — use HSV modifier + best qualifier + generic
-      // e.g. "Deep Jungle Green" only if jungle actually goes with green
-      parts.push(hsvModifier(), modWords[0].word, generic);
-    } else {
-      // No modifiers at all — HSV + generic, add second generic if available
-      parts.push(hsvModifier(), generic);
-      if (genericWords.length > 1) {
-        parts.push(genericWords[1].word);
-      }
-    }
-  } else if (modWords.length > 0) {
-    // Only qualifiers, no color words — use best qualifier + hue family
-    parts.push(modWords[0].word, hueFamily());
-  } else {
-    // Very sparse data — HSV modifier + hue family
-    parts.push(hsvModifier(), hueFamily());
+  // Strategy 2: HSV modifier + each standalone color
+  for (const sa of standalones.slice(0, 5)) {
+    addCandidate([hMod, sa.word]);
   }
 
-  // Ensure at least 2 words
-  if (parts.length < 2) {
-    // Fallback: find closest result with 2+ word name
-    for (const r of results) {
-      if (r.name.trim().split(/\s+/).length >= 2) return r.name;
-    }
-    if (parts.length === 1) {
-      parts.unshift(hsvModifier());
-    } else {
-      return results[0].name;
+  // Strategy 3: Each consensus modifier + each standalone color
+  for (const mod of mods.slice(0, 4)) {
+    for (const sa of standalones.slice(0, 3)) {
+      addCandidate([mod.word, sa.word]);
     }
   }
 
-  // Deduplicate (e.g. "dark dark")
-  const deduped = parts.filter((w, i) => i === 0 || w !== parts[i - 1]);
+  // Strategy 4: modifier + generic color family
+  for (const mod of mods.slice(0, 4)) {
+    for (const gen of generics.slice(0, 2)) {
+      addCandidate([mod.word, gen.word]);
+    }
+  }
 
-  return deduped.map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+  // Strategy 5: HSV modifier + modifier-as-qualifier + generic
+  for (const mod of mods.slice(0, 3)) {
+    for (const gen of generics.slice(0, 2)) {
+      addCandidate([hMod, mod.word, gen.word]);
+    }
+  }
+
+  // Strategy 6: HSV modifier + standalone
+  for (const sa of standalones.slice(0, 3)) {
+    for (const gen of generics.slice(0, 2)) {
+      addCandidate([sa.word, gen.word]);
+    }
+  }
+
+  // Strategy 7: HSV modifier + generic (simple fallback)
+  for (const gen of generics.slice(0, 2)) {
+    addCandidate([hMod, gen.word]);
+  }
+
+  // Strategy 8: modifier + hue family
+  for (const mod of mods.slice(0, 3)) {
+    addCandidate([mod.word, hFam]);
+  }
+
+  // Ultimate fallback
+  if (candidates.length === 0) {
+    addCandidate([hMod, hFam]);
+  }
+
+  return candidates;
+}
+
+function renderSuggestedNames(results) {
+  const names = generateSuggestedNames(results);
+  suggestedNamesList.innerHTML = '';
+  if (names.length === 0) {
+    suggestedNamesList.innerHTML = '<span style="color:var(--text-muted);font-size:0.8rem;">—</span>';
+    return;
+  }
+  for (const name of names) {
+    const chip = document.createElement('span');
+    chip.className = 'suggested-name-chip';
+    chip.textContent = name;
+    suggestedNamesList.appendChild(chip);
+  }
 }
 
 function renderResults(results) {
