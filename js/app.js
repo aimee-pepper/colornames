@@ -414,40 +414,67 @@ function generateSuggestedName(results) {
     return 'red';
   }
 
+  // --- Build co-occurrence map ---
+  // Track which words appear TOGETHER in the same color name, so we only
+  // combine words that actually co-occur rather than mashing unrelated colors
+  const cooccurs = new Map(); // "word1\tword2" → count
+  for (const color of nearby) {
+    const words = color.name.toLowerCase()
+      .replace(/[''`]/g, '').replace(/[-_]/g, ' ').replace(/\s+/g, ' ').trim()
+      .split(/\s+/)
+      .filter(w => w.length >= 2 && !filler.has(w));
+    for (let i = 0; i < words.length; i++) {
+      for (let j = i + 1; j < words.length; j++) {
+        const key = [words[i], words[j]].sort().join('\t');
+        cooccurs.set(key, (cooccurs.get(key) || 0) + 1);
+      }
+    }
+  }
+
+  function wordsCooccur(a, b) {
+    const key = [a, b].sort().join('\t');
+    return (cooccurs.get(key) || 0) >= 1;
+  }
+
+  // Find the best modifier that co-occurs with a given base word
+  function bestModFor(baseWord) {
+    const coMods = modWords.filter(m => wordsCooccur(m.word, baseWord));
+    return coMods.length > 0 ? coMods[0].word : null;
+  }
+
   // --- Build the name ---
   const parts = [];
 
-  // Best modifier from consensus, or fall back to HSV-derived one
-  const mod = modWords.length > 0 ? modWords[0].word : hsvModifier();
-
   if (standaloneWords.length > 0) {
-    // We have a real color name (viridian, sienna, etc.) — use it
-    parts.push(mod, standaloneWords[0].word);
+    // We have a real color name (viridian, sienna, etc.)
+    const base = standaloneWords[0].word;
+    // Prefer a modifier that actually co-occurs with this color name
+    const coMod = bestModFor(base);
+    const mod = coMod || (modWords.length > 0 ? modWords[0].word : hsvModifier());
+    parts.push(mod, base);
   } else if (genericWords.length > 0) {
     // We have a generic color family (green, blue) — need qualifier(s)
     const generic = genericWords[0].word;
+    // Find modifier that co-occurs with this generic word
+    const coMod = bestModFor(generic);
 
-    if (modWords.length >= 2) {
-      // Two qualifiers + generic: "Deep Jungle Green"
-      parts.push(modWords[0].word, modWords[1].word, generic);
-    } else if (modWords.length === 1) {
-      // One qualifier + generic: "Forest Green"
-      parts.push(modWords[0].word, generic);
+    if (coMod) {
+      // Use the co-occurring modifier: "Forest Green", "Persian Blue"
+      parts.push(coMod, generic);
+    } else if (modWords.length > 0) {
+      // No co-occurrence — use HSV modifier + best qualifier + generic
+      // e.g. "Deep Jungle Green" only if jungle actually goes with green
+      parts.push(hsvModifier(), modWords[0].word, generic);
     } else {
-      // HSV modifier + generic: "Deep Green" — add second generic if available
+      // No modifiers at all — HSV + generic, add second generic if available
       parts.push(hsvModifier(), generic);
       if (genericWords.length > 1) {
         parts.push(genericWords[1].word);
       }
     }
   } else if (modWords.length > 0) {
-    // Only qualifiers, no color words at all — append hue family
-    // e.g. "Jungle" → "Jungle Green", "Persian" → "Persian Blue"
-    parts.push(mod);
-    if (modWords.length > 1 && modWords[1].word !== mod) {
-      parts.push(modWords[1].word);
-    }
-    parts.push(hueFamily());
+    // Only qualifiers, no color words — use best qualifier + hue family
+    parts.push(modWords[0].word, hueFamily());
   } else {
     // Very sparse data — HSV modifier + hue family
     parts.push(hsvModifier(), hueFamily());
