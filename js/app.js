@@ -282,7 +282,7 @@ function generateSuggestedName(results) {
 
   // Weight each color inversely by distance (closer = more influence)
   const wordScores = new Map();
-  const filler = new Set(['a', 'an', 'the', 'of', 'de', 'du', 'no', 'is', 'in', 'at', 'to', 'and', 'or', 'with', 'ral', 'ntc', 'css', 'mac', 'nars', 'opi']);
+  const filler = new Set(['a', 'an', 'the', 'of', 'de', 'du', 'no', 'is', 'in', 'at', 'to', 'and', 'or', 'with', 'ral', 'ntc', 'css']);
 
   const modifiers = new Set([
     'light', 'dark', 'pale', 'deep', 'bright', 'vivid', 'muted', 'soft',
@@ -600,7 +600,7 @@ function renderCommonness(results) {
   // Words too generic to group by
   const stopWords = new Set([
     'a', 'an', 'the', 'of', 'de', 'du', 'no', 'is', 'in', 'at', 'to',
-    'and', 'or', 'with', 'ral', 'ntc', 'css', 'mac', 'nars', 'opi',
+    'and', 'or', 'with', 'ral', 'ntc', 'css',
   ]);
 
   function getWords(name) {
