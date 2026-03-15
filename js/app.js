@@ -264,23 +264,26 @@ function update() {
   suggestedNameEl.textContent = generateSuggestedName(results);
 }
 
-// Generate a suggested color name from nearby results
+// Generate a suggested color name from nearby results (always 2+ words)
 function generateSuggestedName(results) {
   if (results.length === 0) return '—';
 
-  // If the closest match is very close (deltaE < 2), just use its name
-  if (results[0].distance < 2) return results[0].name;
+  // If the closest match is very close (deltaE < 2) AND has 2+ words, use it
+  if (results[0].distance < 2 && results[0].name.trim().split(/\s+/).length >= 2) {
+    return results[0].name;
+  }
 
   // Use only the closest results (within delta 15 or top 30, whichever is smaller)
   const nearby = results.filter(r => r.distance <= 15).slice(0, 30);
-  if (nearby.length === 0) return results[0].name;
+  if (nearby.length === 0 && results.length > 0) {
+    // Nothing within 15, use top 10 anyway
+    nearby.push(...results.slice(0, 10));
+  }
 
   // Weight each color inversely by distance (closer = more influence)
-  // Score each word by weighted frequency
   const wordScores = new Map();
   const filler = new Set(['a', 'an', 'the', 'of', 'de', 'du', 'no', 'is', 'in', 'at', 'to', 'and', 'or', 'with']);
 
-  // Track which category each word tends to fill (modifier vs base)
   const modifiers = new Set([
     'light', 'dark', 'pale', 'deep', 'bright', 'vivid', 'muted', 'soft',
     'warm', 'cool', 'hot', 'rich', 'dusty', 'smoky', 'pastel', 'neon',
@@ -308,7 +311,7 @@ function generateSuggestedName(results) {
   const modWords = [];
   const baseWords = [];
   for (const [word, data] of wordScores) {
-    if (data.count < 2) continue; // need at least 2 appearances
+    if (data.count < 2) continue;
     const entry = { word, score: data.score, count: data.count };
     if (modifiers.has(word)) {
       modWords.push(entry);
@@ -320,25 +323,52 @@ function generateSuggestedName(results) {
   modWords.sort((a, b) => b.score - a.score);
   baseWords.sort((a, b) => b.score - a.score);
 
-  // Build the name: up to 1 modifier + 1-2 base words
+  // Build the name: must be at least 2 words
   const parts = [];
-  if (modWords.length > 0) {
+
+  if (modWords.length > 0 && baseWords.length > 0) {
+    // modifier + base
     parts.push(modWords[0].word);
-  }
-  if (baseWords.length > 0) {
     parts.push(baseWords[0].word);
-    // Add a second base word if it scores nearly as high and is different
-    if (baseWords.length > 1 && baseWords[1].score > baseWords[0].score * 0.5) {
+    // Optional third word if strong enough
+    if (baseWords.length > 1 && baseWords[1].score > baseWords[0].score * 0.6) {
       parts.push(baseWords[1].word);
+    }
+  } else if (baseWords.length >= 2) {
+    // two base words
+    parts.push(baseWords[0].word);
+    parts.push(baseWords[1].word);
+  } else if (modWords.length >= 2) {
+    // two modifiers (rare but possible)
+    parts.push(modWords[0].word);
+    parts.push(modWords[1].word);
+  } else if (baseWords.length === 1 && modWords.length === 0) {
+    // Only one base word — pull a modifier from single-occurrence words
+    parts.push(baseWords[0].word);
+    // Find best single-occurrence modifier to pair with
+    const singleMods = [];
+    for (const [word, data] of wordScores) {
+      if (modifiers.has(word) && !parts.includes(word)) {
+        singleMods.push({ word, score: data.score });
+      }
+    }
+    singleMods.sort((a, b) => b.score - a.score);
+    if (singleMods.length > 0) {
+      parts.unshift(singleMods[0].word);
     }
   }
 
-  if (parts.length === 0) {
-    // Fallback: just use the closest color's name
+  // If we still have < 2 words, fall back to the closest 2+ word name
+  if (parts.length < 2) {
+    for (const r of results) {
+      if (r.name.trim().split(/\s+/).length >= 2) {
+        return r.name;
+      }
+    }
+    // Last resort: closest name even if 1 word
     return results[0].name;
   }
 
-  // Title-case each word
   return parts.map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
 }
 
@@ -579,9 +609,10 @@ function renderCommonness(results) {
       .filter(w => w.length >= 3 && !stopWords.has(w));
   }
 
-  // --- Exact name groups ---
+  // --- Exact name groups (only close colors, deltaE <= 10) ---
+  const closeResults = results.filter(r => r.distance <= 10);
   const exactGroups = new Map();
-  for (const color of results) {
+  for (const color of closeResults) {
     const key = normalizeName(color.name);
     if (!exactGroups.has(key)) {
       exactGroups.set(key, { displayName: color.name, colors: [], type: 'exact' });
