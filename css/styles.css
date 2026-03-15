@@ -747,6 +747,35 @@ header h1 {
   text-align: right;
 }
 
+/* Suggested Name */
+.suggested-name {
+  background: var(--surface);
+  border-radius: var(--radius);
+  padding: 0.5rem 1rem;
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow);
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.suggested-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.suggested-value {
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--text);
+  letter-spacing: -0.01em;
+}
+
 /* Footer */
 footer {
   margin-top: auto;

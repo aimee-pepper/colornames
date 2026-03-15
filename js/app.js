@@ -11,6 +11,7 @@ const resultsList = document.getElementById('results-list');
 const filterContainer = document.getElementById('filter-buttons');
 const deltaSlider = document.getElementById('delta-slider');
 const deltaValue = document.getElementById('delta-value');
+const suggestedNameEl = document.getElementById('suggested-name-value');
 
 const sliders = {
   c: document.getElementById('slider-c'),
@@ -260,6 +261,85 @@ function update() {
   renderResults(results);
   renderRadial(results, lastTargetLab, hex);
   renderCommonness(results);
+  suggestedNameEl.textContent = generateSuggestedName(results);
+}
+
+// Generate a suggested color name from nearby results
+function generateSuggestedName(results) {
+  if (results.length === 0) return '—';
+
+  // If the closest match is very close (deltaE < 2), just use its name
+  if (results[0].distance < 2) return results[0].name;
+
+  // Use only the closest results (within delta 15 or top 30, whichever is smaller)
+  const nearby = results.filter(r => r.distance <= 15).slice(0, 30);
+  if (nearby.length === 0) return results[0].name;
+
+  // Weight each color inversely by distance (closer = more influence)
+  // Score each word by weighted frequency
+  const wordScores = new Map();
+  const filler = new Set(['a', 'an', 'the', 'of', 'de', 'du', 'no', 'is', 'in', 'at', 'to', 'and', 'or', 'with']);
+
+  // Track which category each word tends to fill (modifier vs base)
+  const modifiers = new Set([
+    'light', 'dark', 'pale', 'deep', 'bright', 'vivid', 'muted', 'soft',
+    'warm', 'cool', 'hot', 'rich', 'dusty', 'smoky', 'pastel', 'neon',
+    'medium', 'electric', 'royal', 'baby', 'old', 'true', 'pure',
+    'burnt', 'raw', 'french', 'indian', 'persian', 'chinese', 'japanese',
+  ]);
+
+  for (const color of nearby) {
+    const weight = 1 / (1 + color.distance);
+    const words = color.name.toLowerCase()
+      .replace(/[''`]/g, '')
+      .replace(/[-_]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .split(/\s+/)
+      .filter(w => w.length >= 2 && !filler.has(w));
+
+    for (const word of words) {
+      const prev = wordScores.get(word) || { score: 0, count: 0 };
+      wordScores.set(word, { score: prev.score + weight, count: prev.count + 1 });
+    }
+  }
+
+  // Separate into modifier words and base words
+  const modWords = [];
+  const baseWords = [];
+  for (const [word, data] of wordScores) {
+    if (data.count < 2) continue; // need at least 2 appearances
+    const entry = { word, score: data.score, count: data.count };
+    if (modifiers.has(word)) {
+      modWords.push(entry);
+    } else {
+      baseWords.push(entry);
+    }
+  }
+
+  modWords.sort((a, b) => b.score - a.score);
+  baseWords.sort((a, b) => b.score - a.score);
+
+  // Build the name: up to 1 modifier + 1-2 base words
+  const parts = [];
+  if (modWords.length > 0) {
+    parts.push(modWords[0].word);
+  }
+  if (baseWords.length > 0) {
+    parts.push(baseWords[0].word);
+    // Add a second base word if it scores nearly as high and is different
+    if (baseWords.length > 1 && baseWords[1].score > baseWords[0].score * 0.5) {
+      parts.push(baseWords[1].word);
+    }
+  }
+
+  if (parts.length === 0) {
+    // Fallback: just use the closest color's name
+    return results[0].name;
+  }
+
+  // Title-case each word
+  return parts.map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
 }
 
 function renderResults(results) {
