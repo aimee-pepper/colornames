@@ -1,4 +1,4 @@
-import { cmykToRgb, rgbToHex, luminance, rgbToHsv, hsvToRgb, rgbToCmyk, rgbToLab } from './color-convert.js';
+import { cmykToRgb, rgbToHex, hexToRgb, luminance, rgbToHsv, hsvToRgb, rgbToCmyk, rgbToLab } from './color-convert.js';
 import { init, findClosest, libraries, getColorCount } from './color-search.js';
 
 // DOM elements
@@ -268,31 +268,44 @@ function update() {
 function generateSuggestedName(results) {
   if (results.length === 0) return '—';
 
-  // If the closest match is very close (deltaE < 2) AND has 2+ words, use it
-  if (results[0].distance < 2 && results[0].name.trim().split(/\s+/).length >= 2) {
+  // If the closest match is very close (deltaE < 1) AND has 2+ words, use it
+  if (results[0].distance < 1 && results[0].name.trim().split(/\s+/).length >= 2) {
     return results[0].name;
   }
 
-  // Use only the closest results (within delta 15 or top 30, whichever is smaller)
-  const nearby = results.filter(r => r.distance <= 15).slice(0, 30);
-  if (nearby.length === 0 && results.length > 0) {
-    // Nothing within 15, use top 10 anyway
-    nearby.push(...results.slice(0, 10));
-  }
+  const h = currentHue, s = currentSat, v = currentVal;
 
-  // Weight each color inversely by distance (closer = more influence)
-  const wordScores = new Map();
-  const filler = new Set(['a', 'an', 'the', 'of', 'de', 'du', 'no', 'is', 'in', 'at', 'to', 'and', 'or', 'with', 'ral', 'ntc', 'css']);
+  // --- Classify words ---
+  const filler = new Set([
+    'a', 'an', 'the', 'of', 'de', 'du', 'no', 'is', 'in', 'at', 'to',
+    'and', 'or', 'with', 'ral', 'ntc', 'css',
+  ]);
 
-  const modifiers = new Set([
+  // Generic color family words — we want to avoid these as the ONLY descriptor
+  const genericColors = new Set([
+    'red', 'blue', 'green', 'yellow', 'orange', 'purple', 'pink', 'brown',
+    'grey', 'gray', 'white', 'black', 'violet', 'cyan', 'magenta',
+  ]);
+
+  // Modifier words that describe lightness/saturation/temperature
+  const modifierWords = new Set([
     'light', 'dark', 'pale', 'deep', 'bright', 'vivid', 'muted', 'soft',
     'warm', 'cool', 'hot', 'rich', 'dusty', 'smoky', 'pastel', 'neon',
     'medium', 'electric', 'royal', 'baby', 'old', 'true', 'pure',
     'burnt', 'raw', 'french', 'indian', 'persian', 'chinese', 'japanese',
+    'tropical', 'antique', 'vintage', 'classic', 'natural', 'steel',
+    'powder', 'midnight', 'misty', 'faded', 'intense', 'dull',
   ]);
 
+  // Use closest results, weighted by proximity
+  const nearby = results.filter(r => r.distance <= 12).slice(0, 40);
+  if (nearby.length === 0) nearby.push(...results.slice(0, 10));
+
+  // Score words from nearby colors
+  const wordData = new Map();
   for (const color of nearby) {
-    const weight = 1 / (1 + color.distance);
+    const weight = 1 / (1 + color.distance * color.distance); // square falloff
+    const colorHsv = rgbToHsv(...hexToRgb(color.hex));
     const words = color.name.toLowerCase()
       .replace(/[''`]/g, '')
       .replace(/[-_]/g, ' ')
@@ -302,74 +315,131 @@ function generateSuggestedName(results) {
       .filter(w => w.length >= 2 && !filler.has(w));
 
     for (const word of words) {
-      const prev = wordScores.get(word) || { score: 0, count: 0 };
-      wordScores.set(word, { score: prev.score + weight, count: prev.count + 1 });
+      const prev = wordData.get(word) || { score: 0, count: 0, hsvSamples: [] };
+      prev.score += weight;
+      prev.count += 1;
+      prev.hsvSamples.push(colorHsv);
+      wordData.set(word, prev);
     }
   }
 
-  // Separate into modifier words and base words
-  const modWords = [];
-  const baseWords = [];
-  for (const [word, data] of wordScores) {
-    if (data.count < 2) continue;
+  // Categorize into specific names, generic colors, and modifiers
+  const specificWords = []; // e.g. viridian, cerulean, sienna, sage, teal
+  const genericWords = []; // e.g. green, blue, red
+  const modWords = [];     // e.g. dark, pale, deep
+
+  for (const [word, data] of wordData) {
+    if (data.count < 2) continue; // need consensus
     const entry = { word, score: data.score, count: data.count };
-    if (modifiers.has(word)) {
+    if (modifierWords.has(word)) {
       modWords.push(entry);
+    } else if (genericColors.has(word)) {
+      genericWords.push(entry);
     } else {
-      baseWords.push(entry);
+      specificWords.push(entry);
     }
   }
 
-  modWords.sort((a, b) => b.score - a.score);
-  baseWords.sort((a, b) => b.score - a.score);
+  // Also collect single-occurrence specific words (with lower priority)
+  const singleSpecific = [];
+  for (const [word, data] of wordData) {
+    if (data.count === 1 && !modifierWords.has(word) && !genericColors.has(word) && !filler.has(word)) {
+      singleSpecific.push({ word, score: data.score, count: 1 });
+    }
+  }
 
-  // Build the name: must be at least 2 words
+  specificWords.sort((a, b) => b.score - a.score);
+  genericWords.sort((a, b) => b.score - a.score);
+  modWords.sort((a, b) => b.score - a.score);
+  singleSpecific.sort((a, b) => b.score - a.score);
+
+  // --- Determine HSV-based modifier ---
+  // Compare current color to the average HSV of the best base word's sources
+  function hsvModifier() {
+    if (s < 8 && v > 85) return 'pale';
+    if (s < 12 && v < 25) return 'charcoal';
+    if (s < 15) return 'muted';
+    if (v < 20) return 'dark';
+    if (v < 35 && s > 50) return 'deep';
+    if (v < 45) return 'dark';
+    if (v > 85 && s < 35) return 'pale';
+    if (v > 80 && s < 50) return 'light';
+    if (s > 85 && v > 70) return 'vivid';
+    if (s > 75 && v > 60) return 'bright';
+    if (s < 30 && v > 50 && v < 80) return 'dusty';
+    if (s > 50 && v > 50) return 'rich';
+    return 'soft';
+  }
+
+  // --- Build the name ---
   const parts = [];
 
-  if (modWords.length > 0 && baseWords.length > 0) {
-    // modifier + base
-    parts.push(modWords[0].word);
-    parts.push(baseWords[0].word);
-    // Optional third word if strong enough
-    if (baseWords.length > 1 && baseWords[1].score > baseWords[0].score * 0.6) {
-      parts.push(baseWords[1].word);
+  // Step 1: Pick the best base — prefer specific over generic
+  let basePicked = null;
+  if (specificWords.length > 0) {
+    basePicked = specificWords[0].word;
+  }
+
+  // Step 2: Pick modifier
+  // Prefer consensus modifier from nearby names if it fits, otherwise use HSV
+  let modPicked = null;
+  if (modWords.length > 0) {
+    modPicked = modWords[0].word;
+  }
+
+  // Step 3: Assemble
+  if (basePicked && modPicked) {
+    // specific base + consensus modifier → great name
+    parts.push(modPicked, basePicked);
+  } else if (basePicked && !modPicked) {
+    // specific base but no consensus modifier → use HSV modifier
+    parts.push(hsvModifier(), basePicked);
+  } else if (!basePicked && genericWords.length > 0) {
+    // only generic color words — need to make it specific
+    const generic = genericWords[0].word;
+    if (modPicked) {
+      parts.push(modPicked, generic);
+    } else {
+      parts.push(hsvModifier(), generic);
     }
-  } else if (baseWords.length >= 2) {
-    // two base words
-    parts.push(baseWords[0].word);
-    parts.push(baseWords[1].word);
-  } else if (modWords.length >= 2) {
-    // two modifiers (rare but possible)
-    parts.push(modWords[0].word);
-    parts.push(modWords[1].word);
-  } else if (baseWords.length === 1 && modWords.length === 0) {
-    // Only one base word — pull a modifier from single-occurrence words
-    parts.push(baseWords[0].word);
-    // Find best single-occurrence modifier to pair with
-    const singleMods = [];
-    for (const [word, data] of wordScores) {
-      if (modifiers.has(word) && !parts.includes(word)) {
-        singleMods.push({ word, score: data.score });
-      }
+    // Try to add a second descriptor to avoid "Deep Green" being too broad
+    // Look for a specific word (even single-occurrence) or a second generic
+    if (specificWords.length > 0) {
+      parts.splice(1, 0, specificWords[0].word);
+    } else if (singleSpecific.length > 0) {
+      parts.splice(1, 0, singleSpecific[0].word);
+    } else if (genericWords.length > 1) {
+      // e.g. "Deep Blue Green"
+      parts.push(genericWords[1].word);
     }
-    singleMods.sort((a, b) => b.score - a.score);
-    if (singleMods.length > 0) {
-      parts.unshift(singleMods[0].word);
+  } else {
+    // Very sparse data — use HSV modifier + closest color name word
+    const anyWord = [...wordData.entries()]
+      .filter(([w]) => !filler.has(w) && !modifierWords.has(w))
+      .sort((a, b) => b[1].score - a[1].score);
+    if (anyWord.length > 0) {
+      parts.push(hsvModifier(), anyWord[0][0]);
+      if (anyWord.length > 1) parts.push(anyWord[1][0]);
     }
   }
 
-  // If we still have < 2 words, fall back to the closest 2+ word name
+  // Ensure at least 2 words
   if (parts.length < 2) {
+    // Fallback: find closest result with 2+ word name
     for (const r of results) {
-      if (r.name.trim().split(/\s+/).length >= 2) {
-        return r.name;
-      }
+      if (r.name.trim().split(/\s+/).length >= 2) return r.name;
     }
-    // Last resort: closest name even if 1 word
-    return results[0].name;
+    if (parts.length === 1) {
+      parts.unshift(hsvModifier());
+    } else {
+      return results[0].name;
+    }
   }
 
-  return parts.map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+  // Deduplicate (e.g. "dark dark")
+  const deduped = parts.filter((w, i) => i === 0 || w !== parts[i - 1]);
+
+  return deduped.map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
 }
 
 function renderResults(results) {
