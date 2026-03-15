@@ -560,12 +560,12 @@ header h1 {
   display: flex;
   gap: 0.75rem;
   align-items: stretch;
+  height: 180px;
 }
 
 .sv-panel-wrap {
   position: relative;
   flex: 1;
-  height: 180px;
   border-radius: 4px;
   overflow: hidden;
   border: 1px solid var(--border);
@@ -745,6 +745,10 @@ header h1 {
   flex-shrink: 0;
   width: 48px;
   text-align: right;
+}
+
+.panel-left-spacer {
+  flex: 1;
 }
 
 /* Suggested Name */
