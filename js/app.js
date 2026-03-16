@@ -422,7 +422,8 @@ function generateSuggestedNames(results) {
     const mod = describeHsvDiff(r.hex);
     if (mod && couldMatchWithAdjustment(r.hex)) {
       const modName = titleCase(mod + ' ' + r.name.toLowerCase());
-      add(modName, `${mod}er than ${r.name} (${r.library}, ΔE ${r.distance.toFixed(1)})`);
+      const comparative = { deep: 'deeper', dark: 'darker', light: 'lighter', pale: 'paler', vivid: 'more vivid', muted: 'more muted' }[mod] || `more ${mod}`;
+      add(modName, `${comparative} than ${r.name} (${r.library}, ΔE ${r.distance.toFixed(1)})`);
     }
   }
 
