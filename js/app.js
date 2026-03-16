@@ -436,10 +436,10 @@ function generateSuggestedNames(results) {
   const wordData = new Map();
   for (const color of nearby) {
     const weight = 1 / (1 + color.distance * color.distance);
-    const words = color.name.toLowerCase()
+    const words = [...new Set(color.name.toLowerCase()
       .replace(/[''`]/g, '').replace(/[-_]/g, ' ').replace(/\s+/g, ' ').trim()
       .split(/\s+/)
-      .filter(w => w.length >= 2 && !filler.has(w));
+      .filter(w => w.length >= 2 && !filler.has(w)))];
     for (const word of words) {
       const prev = wordData.get(word) || { score: 0, count: 0 };
       prev.score += weight;
