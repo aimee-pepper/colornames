@@ -264,11 +264,13 @@ function update() {
   renderSuggestedNames(results);
 }
 
-// Generate multiple suggested color name candidates
+// Generate suggested color name candidates with reasoning
 function generateSuggestedNames(results) {
   if (results.length === 0) return [];
 
   const h = currentHue, s = currentSat, v = currentVal;
+  const [curR, curG, curB] = hsvToRgb(h, s, v);
+  const curLab = rgbToLab(curR, curG, curB);
 
   const filler = new Set([
     'a', 'an', 'the', 'of', 'de', 'du', 'no', 'is', 'in', 'at', 'to',
@@ -317,10 +319,9 @@ function generateSuggestedNames(results) {
     'sunset', 'sunrise', 'twilight', 'lunar', 'solar', 'cosmic',
     'blood', 'wine', 'iron', 'golden',
     'hunter', 'military', 'imperial', 'venetian', 'transparent',
-    'permanent', 'new', 'chrome', 'mars', 'nickel', 'cobalt',
+    'permanent', 'new', 'chrome', 'mars', 'nickel',
   ]);
 
-  // HSV-based modifier
   function hsvModifier() {
     if (s < 8 && v > 85) return 'pale';
     if (s < 12 && v < 25) return 'charcoal';
@@ -337,7 +338,6 @@ function generateSuggestedNames(results) {
     return 'soft';
   }
 
-  // Color family from HSV hue
   function hueFamily() {
     if (s < 10) return 'grey';
     if (h < 15 || h >= 345) return 'red';
@@ -351,15 +351,86 @@ function generateSuggestedNames(results) {
     return 'red';
   }
 
-  function titleCase(words) {
-    return words.map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+  function titleCase(str) {
+    return str.replace(/\b\w/g, c => c.toUpperCase());
   }
 
-  // Collect unique 2+ word names from nearby results
+  // Determine how our color differs from a reference color in HSV terms
+  function describeHsvDiff(refHex) {
+    const [rr, rg, rb] = hexToRgb(refHex);
+    const [rh, rs, rv] = rgbToHsv(rr, rg, rb);
+    const dv = v - rv; // positive = we're lighter
+    const ds = s - rs; // positive = we're more saturated
+
+    // Check: same hue (within 20°), difference is mainly value/saturation
+    const hueDiff = Math.abs(h - rh);
+    const hueClose = hueDiff < 25 || hueDiff > 335;
+    if (!hueClose) return null;
+
+    // Need a meaningful V or S difference
+    if (Math.abs(dv) < 10 && Math.abs(ds) < 10) return null;
+
+    if (dv < -20 && ds > 15) return 'deep';
+    if (dv < -15) return 'dark';
+    if (dv > 20 && ds < -15) return 'pale';
+    if (dv > 15) return 'light';
+    if (ds > 20) return 'vivid';
+    if (ds < -20) return 'muted';
+    if (dv < -10) return 'dark';
+    if (dv > 10) return 'light';
+    return null;
+  }
+
+  // Check if adjusting V/S of a reference color could match ours within deltaE 5
+  function couldMatchWithAdjustment(refHex) {
+    const [rr, rg, rb] = hexToRgb(refHex);
+    const [rh, rs, rv] = rgbToHsv(rr, rg, rb);
+    // Try the reference color's hue with our S and V
+    const [tr, tg, tb] = hsvToRgb(rh, s, v);
+    const testLab = rgbToLab(tr, tg, tb);
+    const dL = curLab[0] - testLab[0];
+    const da = curLab[1] - testLab[1];
+    const db = curLab[2] - testLab[2];
+    return Math.sqrt(dL * dL + da * da + db * db) < 5;
+  }
+
+  const seen = new Set();
+  const candidates = [];
+
+  function add(name, reason) {
+    const key = name.toLowerCase();
+    if (seen.has(key)) return;
+    if (name.split(/\s+/).length < 2) return;
+    seen.add(key);
+    candidates.push({ name, reason });
+  }
+
+  // === PRIORITY 1: Exact match — existing color with deltaE < 3 ===
+  for (const r of results) {
+    if (r.distance >= 3) break; // results are sorted by distance
+    const words = r.name.trim().split(/\s+/);
+    if (words.length >= 2) {
+      add(r.name, `exact match — ${r.library}, ΔE ${r.distance.toFixed(1)}`);
+    }
+  }
+
+  // === PRIORITY 2: Similar color + HSV modifier ===
+  // Find colors with same hue but different S/V, where adjusting S/V would match
+  for (const r of results.slice(0, 60)) {
+    if (r.distance < 3) continue; // already handled as exact
+    if (r.distance > 25) break;
+    const mod = describeHsvDiff(r.hex);
+    if (mod && couldMatchWithAdjustment(r.hex)) {
+      const modName = titleCase(mod + ' ' + r.name.toLowerCase());
+      add(modName, `${mod}er than ${r.name} (${r.library}, ΔE ${r.distance.toFixed(1)})`);
+    }
+  }
+
+  // === PRIORITY 3: Qualifier + standalone color name ===
+  // Score words from nearby colors
   const nearby = results.filter(r => r.distance <= 15).slice(0, 50);
   if (nearby.length === 0) nearby.push(...results.slice(0, 10));
 
-  // Score words
   const wordData = new Map();
   for (const color of nearby) {
     const weight = 1 / (1 + color.distance * color.distance);
@@ -375,14 +446,13 @@ function generateSuggestedNames(results) {
     }
   }
 
-  // Categorize
   const standalones = [], generics = [], mods = [];
   for (const [word, data] of wordData) {
     const entry = { word, score: data.score, count: data.count };
     if (modifierWords.has(word)) { mods.push(entry); }
     else if (genericColors.has(word)) { generics.push(entry); }
     else if (standaloneColorNames.has(word)) { standalones.push(entry); }
-    else if (data.count >= 2) { mods.push(entry); } // unknown → modifier
+    else if (data.count >= 2) { mods.push(entry); }
   }
   standalones.sort((a, b) => b.score - a.score);
   generics.sort((a, b) => b.score - a.score);
@@ -390,88 +460,60 @@ function generateSuggestedNames(results) {
 
   const hMod = hsvModifier();
   const hFam = hueFamily();
-  const seen = new Set();
-  const candidates = [];
 
-  function addCandidate(parts) {
-    // Deduplicate adjacent words
-    const deduped = parts.filter((w, i) => i === 0 || w !== parts[i - 1]);
-    if (deduped.length < 2) return;
-    const name = titleCase(deduped);
-    if (seen.has(name.toLowerCase())) return;
-    seen.add(name.toLowerCase());
-    candidates.push(name);
-  }
-
-  // Strategy 1: Existing multi-word names from very close matches (deltaE < 3)
-  for (const r of results.filter(r => r.distance < 3)) {
-    const words = r.name.trim().split(/\s+/);
-    if (words.length >= 2) addCandidate(words.map(w => w.toLowerCase()));
-  }
-
-  // Strategy 2: HSV modifier + each standalone color
-  for (const sa of standalones.slice(0, 5)) {
-    addCandidate([hMod, sa.word]);
-  }
-
-  // Strategy 3: Each consensus modifier + each standalone color
+  // Qualifier + standalone: "Burnt Sienna", "Forest Sage"
   for (const mod of mods.slice(0, 4)) {
     for (const sa of standalones.slice(0, 3)) {
-      addCandidate([mod.word, sa.word]);
+      const name = titleCase(mod.word + ' ' + sa.word);
+      add(name, `common qualifier "${mod.word}" + color "${sa.word}"`);
     }
   }
 
-  // Strategy 4: modifier + generic color family
-  for (const mod of mods.slice(0, 4)) {
-    for (const gen of generics.slice(0, 2)) {
-      addCandidate([mod.word, gen.word]);
-    }
-  }
-
-  // Strategy 5: HSV modifier + modifier-as-qualifier + generic
+  // === PRIORITY 4: HSV modifier + qualifier + generic family ===
+  // "Deep Jungle Green", "Pale Dusty Rose"
   for (const mod of mods.slice(0, 3)) {
     for (const gen of generics.slice(0, 2)) {
-      addCandidate([hMod, mod.word, gen.word]);
+      const name = titleCase(hMod + ' ' + mod.word + ' ' + gen.word);
+      add(name, `HSV "${hMod}" + qualifier "${mod.word}" + family "${gen.word}"`);
     }
   }
 
-  // Strategy 6: HSV modifier + standalone
+  // === PRIORITY 5: Standalone + generic family ===
+  // "Sage Green", "Cobalt Blue"
   for (const sa of standalones.slice(0, 3)) {
     for (const gen of generics.slice(0, 2)) {
-      addCandidate([sa.word, gen.word]);
+      const name = titleCase(sa.word + ' ' + gen.word);
+      add(name, `color "${sa.word}" + family "${gen.word}"`);
     }
   }
 
-  // Strategy 7: HSV modifier + generic (simple fallback)
-  for (const gen of generics.slice(0, 2)) {
-    addCandidate([hMod, gen.word]);
-  }
-
-  // Strategy 8: modifier + hue family
+  // === PRIORITY 6: Qualifier + hue family ===
+  // "Forest Green", "Midnight Blue"
   for (const mod of mods.slice(0, 3)) {
-    addCandidate([mod.word, hFam]);
+    const name = titleCase(mod.word + ' ' + hFam);
+    add(name, `qualifier "${mod.word}" + hue family "${hFam}"`);
   }
 
-  // Ultimate fallback
+  // Fallback
   if (candidates.length === 0) {
-    addCandidate([hMod, hFam]);
+    add(titleCase(hMod + ' ' + hFam), `HSV-derived: ${hMod} ${hFam}`);
   }
 
   return candidates;
 }
 
 function renderSuggestedNames(results) {
-  const names = generateSuggestedNames(results);
+  const candidates = generateSuggestedNames(results);
   suggestedNamesList.innerHTML = '';
-  if (names.length === 0) {
+  if (candidates.length === 0) {
     suggestedNamesList.innerHTML = '<span style="color:var(--text-muted);font-size:0.8rem;">—</span>';
     return;
   }
-  for (const name of names) {
-    const chip = document.createElement('span');
-    chip.className = 'suggested-name-chip';
-    chip.textContent = name;
-    suggestedNamesList.appendChild(chip);
+  for (const { name, reason } of candidates) {
+    const row = document.createElement('div');
+    row.className = 'suggested-name-row';
+    row.innerHTML = `<span class="suggested-name-text">${escapeHtml(name)}</span><span class="suggested-name-reason">${escapeHtml(reason)}</span>`;
+    suggestedNamesList.appendChild(row);
   }
 }
 
