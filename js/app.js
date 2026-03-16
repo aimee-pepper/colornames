@@ -28,7 +28,8 @@ const numInputs = {
 };
 
 // State
-const enabledLibraries = new Set(libraries.map((l) => l.name));
+const disabledByDefault = new Set(['Traditional Japanese']);
+const enabledLibraries = new Set(libraries.map((l) => l.name).filter(n => !disabledByDefault.has(n)));
 let currentView = 'list';
 let lastResults = [];
 let lastTargetLab = [0, 0, 0];
@@ -39,7 +40,7 @@ init();
 // Build library filter buttons
 for (const lib of libraries) {
   const btn = document.createElement('button');
-  btn.className = 'filter-btn active';
+  btn.className = enabledLibraries.has(lib.name) ? 'filter-btn active' : 'filter-btn';
   btn.textContent = lib.name;
   btn.dataset.library = lib.name;
   btn.addEventListener('click', () => {
