@@ -422,6 +422,10 @@ function generateSuggestedNames(results) {
     if (r.distance > 25) break;
     const mod = describeHsvDiff(r.hex);
     if (mod && couldMatchWithAdjustment(r.hex)) {
+      // Check the existing name doesn't already contain a conflicting modifier
+      const nameWords = r.name.toLowerCase().split(/\s+/);
+      const hasConflict = nameWords.some(w => modifiersConflict(mod, w));
+      if (hasConflict) continue;
       const modName = titleCase(mod + ' ' + r.name.toLowerCase());
       const comparative = { deep: 'deeper', dark: 'darker', light: 'lighter', pale: 'paler', vivid: 'more vivid', muted: 'more muted' }[mod] || `more ${mod}`;
       add(modName, `${comparative} than ${r.name} (${r.library}, ΔE ${r.distance.toFixed(1)})`);
@@ -463,6 +467,26 @@ function generateSuggestedNames(results) {
   const hMod = hsvModifier();
   const hFam = hueFamily();
 
+  // Conflicting modifier pairs — these should never be combined
+  const conflicts = new Map([
+    ['light', new Set(['dark', 'deep', 'midnight', 'shadow', 'night'])],
+    ['dark', new Set(['light', 'pale', 'bright', 'vivid', 'neon', 'electric', 'pastel', 'baby', 'powder'])],
+    ['pale', new Set(['dark', 'deep', 'vivid', 'bright', 'rich', 'neon', 'electric', 'intense', 'midnight', 'shadow'])],
+    ['deep', new Set(['light', 'pale', 'bright', 'pastel', 'baby', 'powder', 'soft'])],
+    ['bright', new Set(['dark', 'deep', 'muted', 'dull', 'dusty', 'faded', 'shadow'])],
+    ['vivid', new Set(['pale', 'muted', 'dull', 'dusty', 'faded', 'soft'])],
+    ['muted', new Set(['vivid', 'bright', 'neon', 'electric', 'intense'])],
+    ['dusty', new Set(['vivid', 'bright', 'neon', 'electric'])],
+    ['pastel', new Set(['dark', 'deep', 'midnight', 'shadow'])],
+    ['soft', new Set(['vivid', 'neon', 'electric', 'intense', 'deep'])],
+    ['charcoal', new Set(['light', 'pale', 'bright', 'vivid', 'pastel', 'baby', 'powder', 'neon'])],
+  ]);
+
+  function modifiersConflict(a, b) {
+    if (a === b) return true;
+    return (conflicts.get(a)?.has(b)) || (conflicts.get(b)?.has(a));
+  }
+
   // Qualifier + standalone: "Burnt Sienna", "Forest Sage"
   for (const mod of mods.slice(0, 4)) {
     for (const sa of standalones.slice(0, 3)) {
@@ -474,6 +498,7 @@ function generateSuggestedNames(results) {
   // === PRIORITY 4: HSV modifier + qualifier + generic family ===
   // "Deep Jungle Green", "Pale Dusty Rose"
   for (const mod of mods.slice(0, 3)) {
+    if (modifiersConflict(hMod, mod.word)) continue;
     for (const gen of generics.slice(0, 2)) {
       const name = titleCase(hMod + ' ' + mod.word + ' ' + gen.word);
       add(name, `HSV "${hMod}" + qualifier "${mod.word}" + family "${gen.word}"`);
